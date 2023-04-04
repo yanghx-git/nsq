@@ -31,19 +31,28 @@ func main() {
 }
 
 func (p *program) Init(env svc.Environment) error {
+	// 设置默认值
 	opts := nsqd.NewOptions()
 
+	/*flag解析命令行参数*/
+
+	// 先设置默认值
 	flagSet := nsqdFlagSet(opts)
+	// 解析命令行参数
 	flagSet.Parse(os.Args[1:])
 
+	// 使用时间作为随机种子值
 	rand.Seed(time.Now().UTC().UnixNano())
 
+	// 遇到命令 nsqd -version。 用于打印版本，然后退出
 	if flagSet.Lookup("version").Value.(flag.Getter).Get().(bool) {
 		fmt.Println(version.String("nsqd"))
 		os.Exit(0)
 	}
 
+	// 处理配置信息
 	var cfg config
+	// 如果传入 --config='/xxx/xxx.toml'
 	configFile := flagSet.Lookup("config").Value.String()
 	if configFile != "" {
 		_, err := toml.DecodeFile(configFile, &cfg)
@@ -51,10 +60,12 @@ func (p *program) Init(env svc.Environment) error {
 			logFatal("failed to load config file %s - %s", configFile, err)
 		}
 	}
+	// 验证一下。有错误会直接停止进程
 	cfg.Validate()
-
+	// 将 flagSet 和 config 中的配置信息合并到 opts
 	options.Resolve(opts, flagSet, cfg)
 
+	// 创建 nsqd 【重点方法】
 	nsqd, err := nsqd.New(opts)
 	if err != nil {
 		logFatal("failed to instantiate nsqd - %s", err)

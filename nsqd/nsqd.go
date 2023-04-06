@@ -75,7 +75,7 @@ type NSQD struct {
 
 func New(opts *Options) (*NSQD, error) {
 	var err error
-
+	// diskqueue 数据存储路径
 	dataPath := opts.DataPath
 	if opts.DataPath == "" {
 		cwd, _ := os.Getwd()
@@ -86,22 +86,31 @@ func New(opts *Options) (*NSQD, error) {
 	}
 
 	n := &NSQD{
-		startTime:            time.Now(),
+		startTime: time.Now(),
+		// TOPIC 存储 map
 		topicMap:             make(map[string]*Topic),
 		exitChan:             make(chan int),
 		notifyChan:           make(chan interface{}),
 		optsNotificationChan: make(chan struct{}, 1),
-		dl:                   dirlock.New(dataPath),
+		// 目录锁
+		dl: dirlock.New(dataPath),
 	}
+	// 带取消的 context
+	// 这个context 被 program 的 Context 方法使用。 传递到 go-svc 中。
 	n.ctx, n.ctxCancel = context.WithCancel(context.Background())
+
 	httpcli := http_api.NewClient(nil, opts.HTTPClientConnectTimeout, opts.HTTPClientRequestTimeout)
+
+	// 创建集群信息
 	n.ci = clusterinfo.New(n.logf, httpcli)
 
+	// 存储 nsqlookupd 信息
 	n.lookupPeers.Store([]*lookupPeer{})
 
 	n.swapOpts(opts)
 	n.errValue.Store(errStore{})
 
+	// 验证 data-path 目录是否被占用
 	err = n.dl.Lock()
 	if err != nil {
 		return nil, fmt.Errorf("failed to lock data-path: %v", err)
@@ -128,20 +137,29 @@ func New(opts *Options) (*NSQD, error) {
 	}
 	n.tlsConfig = tlsConfig
 
+	// 统计信息
 	for _, v := range opts.E2EProcessingLatencyPercentiles {
 		if v <= 0 || v > 1 {
 			return nil, fmt.Errorf("invalid E2E processing latency percentile: %v", v)
 		}
 	}
 
+	// 打印
 	n.logf(LOG_INFO, version.String("nsqd"))
 	n.logf(LOG_INFO, "ID: %d", opts.ID)
 
+	//TCPAddress:        "0.0.0.0:4150",
+	//HTTPAddress:       "0.0.0.0:4151",
+	//HTTPSAddress:      "0.0.0.0:4152",
+	// 创建  tcpserver
 	n.tcpServer = &tcpServer{nsqd: n}
+	// 监听 tcp 端口
 	n.tcpListener, err = net.Listen(util.TypeOfAddr(opts.TCPAddress), opts.TCPAddress)
+
 	if err != nil {
 		return nil, fmt.Errorf("listen (%s) failed - %s", opts.TCPAddress, err)
 	}
+	// 监听 http 端口
 	if opts.HTTPAddress != "" {
 		n.httpListener, err = net.Listen(util.TypeOfAddr(opts.HTTPAddress), opts.HTTPAddress)
 		if err != nil {
@@ -244,9 +262,13 @@ func (n *NSQD) GetStartTime() time.Time {
 }
 
 func (n *NSQD) Main() error {
+
 	exitCh := make(chan error)
 	var once sync.Once
+	// 退出函数
+	// 如果传入 err 不为 nil. 会打印日志，并停止 当前携程
 	exitFunc := func(err error) {
+		// once.Do() 只会执行一次
 		once.Do(func() {
 			if err != nil {
 				n.logf(LOG_FATAL, "%s", err)
@@ -254,29 +276,36 @@ func (n *NSQD) Main() error {
 			exitCh <- err
 		})
 	}
-
+	// 自己封装的 waitGroup。 Wrap， 会开一个携程 等待匿名函数执行
 	n.waitGroup.Wrap(func() {
-		exitFunc(protocol.TCPServer(n.tcpListener, n.tcpServer, n.logf))
+		// 创建 tcp server
+		// 里面是个无限 for 循环。 会一直阻塞
+		err := protocol.TCPServer(n.tcpListener, n.tcpServer, n.logf)
+		exitFunc(err)
 	})
+	// 创建 http server
 	if n.httpListener != nil {
 		httpServer := newHTTPServer(n, false, n.getOpts().TLSRequired == TLSRequired)
 		n.waitGroup.Wrap(func() {
 			exitFunc(http_api.Serve(n.httpListener, httpServer, "HTTP", n.logf))
 		})
 	}
+	// 创建 https server
 	if n.httpsListener != nil {
 		httpsServer := newHTTPServer(n, true, true)
 		n.waitGroup.Wrap(func() {
 			exitFunc(http_api.Serve(n.httpsListener, httpsServer, "HTTPS", n.logf))
 		})
 	}
-
+	// 维护 channel 中延时队列和等待消息确认队列
 	n.waitGroup.Wrap(n.queueScanLoop)
+	// 连接到 nsqlookupd
 	n.waitGroup.Wrap(n.lookupLoop)
+	// 一个统计的服务
 	if n.getOpts().StatsdAddress != "" {
 		n.waitGroup.Wrap(n.statsdLoop)
 	}
-
+	// 会一直阻塞
 	err := <-exitCh
 	return err
 }

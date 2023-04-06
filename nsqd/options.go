@@ -30,6 +30,7 @@ type Options struct {
 	HTTPClientConnectTimeout time.Duration `flag:"http-client-connect-timeout" cfg:"http_client_connect_timeout"`
 	HTTPClientRequestTimeout time.Duration `flag:"http-client-request-timeout" cfg:"http_client_request_timeout"`
 
+	// 磁盘队列 文件的 路径
 	// diskqueue options
 	DataPath        string        `flag:"data-path"`
 	MemQueueSize    int64         `flag:"mem-queue-size"`

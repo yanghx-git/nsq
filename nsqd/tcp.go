@@ -19,10 +19,13 @@ type Client interface {
 }
 
 type tcpServer struct {
-	nsqd  *NSQD
+	nsqd *NSQD
+	//存储客户端的连接 map
+	// sync.Map  并发map
 	conns sync.Map
 }
 
+// Handle 处理 TCP 连接的方法
 func (p *tcpServer) Handle(conn net.Conn) {
 	p.nsqd.logf(LOG_INFO, "TCP: new client(%s)", conn.RemoteAddr())
 

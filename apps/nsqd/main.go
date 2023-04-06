@@ -30,6 +30,9 @@ func main() {
 	}
 }
 
+// Init
+// 1 构造 Options
+// 2 初始化 NSQD
 func (p *program) Init(env svc.Environment) error {
 	// 设置默认值
 	opts := nsqd.NewOptions()
@@ -76,16 +79,19 @@ func (p *program) Init(env svc.Environment) error {
 }
 
 func (p *program) Start() error {
+	// 加载元数据
 	err := p.nsqd.LoadMetadata()
 	if err != nil {
 		logFatal("failed to load metadata - %s", err)
 	}
+	// 持久化元数据
 	err = p.nsqd.PersistMetadata()
 	if err != nil {
 		logFatal("failed to persist metadata - %s", err)
 	}
 
 	go func() {
+		// 启动 nsqd
 		err := p.nsqd.Main()
 		if err != nil {
 			p.Stop()

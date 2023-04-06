@@ -20,6 +20,7 @@ func TCPServer(listener net.Listener, handler TCPHandler, logf lg.AppLogFunc) er
 	var wg sync.WaitGroup
 
 	for {
+		// 等待客户端的链接 （会阻塞）
 		clientConn, err := listener.Accept()
 		if err != nil {
 			// net.Error.Temporary() is deprecated, but is valid for accept
@@ -35,7 +36,7 @@ func TCPServer(listener net.Listener, handler TCPHandler, logf lg.AppLogFunc) er
 			}
 			break
 		}
-
+		// 连接建立成功后，开启一个 goroutine 处理这个连接的I/O
 		wg.Add(1)
 		go func() {
 			handler.Handle(clientConn)
@@ -43,6 +44,7 @@ func TCPServer(listener net.Listener, handler TCPHandler, logf lg.AppLogFunc) er
 		}()
 	}
 
+	// 等待所有的 handler 处理完成后。才会往下执行
 	// wait to return until all handler goroutines complete
 	wg.Wait()
 

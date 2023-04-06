@@ -29,10 +29,12 @@ type tcpServer struct {
 func (p *tcpServer) Handle(conn net.Conn) {
 	p.nsqd.logf(LOG_INFO, "TCP: new client(%s)", conn.RemoteAddr())
 
+	// 4字节的魔数.表示协议的版本号
 	// The client should initialize itself by sending a 4 byte sequence indicating
 	// the version of the protocol that it intends to communicate, this will allow us
 	// to gracefully upgrade the protocol away from text/line oriented to whatever...
 	buf := make([]byte, 4)
+	// 会阻塞，直到读取够4字节  (  V2)
 	_, err := io.ReadFull(conn, buf)
 	if err != nil {
 		p.nsqd.logf(LOG_ERROR, "failed to read protocol version - %s", err)
@@ -47,18 +49,22 @@ func (p *tcpServer) Handle(conn net.Conn) {
 	var prot protocol.Protocol
 	switch protocolMagic {
 	case "  V2":
+		// 初始化
 		prot = &protocolV2{nsqd: p.nsqd}
 	default:
+		// 协议错误，给个提示信息，结束连接
 		protocol.SendFramedResponse(conn, frameTypeError, []byte("E_BAD_PROTOCOL"))
 		conn.Close()
 		p.nsqd.logf(LOG_ERROR, "client(%s) bad protocol magic '%s'",
 			conn.RemoteAddr(), protocolMagic)
 		return
 	}
-
+	// 对新建立的连接创建 client
 	client := prot.NewClient(conn)
+	// 存储 连接。 放到 map中
 	p.conns.Store(conn.RemoteAddr(), client)
 
+	// io处理
 	err = prot.IOLoop(client)
 	if err != nil {
 		p.nsqd.logf(LOG_ERROR, "client(%s) - %s", conn.RemoteAddr(), err)

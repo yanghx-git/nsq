@@ -20,8 +20,7 @@ type Client interface {
 
 type tcpServer struct {
 	nsqd *NSQD
-	//存储客户端的连接 map
-	// sync.Map  并发map
+	//存储客户端的连接 map  sync.Map  并发map
 	conns sync.Map
 }
 
@@ -64,13 +63,14 @@ func (p *tcpServer) Handle(conn net.Conn) {
 	// 存储 连接。 放到 map中
 	p.conns.Store(conn.RemoteAddr(), client)
 
-	// io处理
+	// io处理 (业务)
 	err = prot.IOLoop(client)
 	if err != nil {
 		p.nsqd.logf(LOG_ERROR, "client(%s) - %s", conn.RemoteAddr(), err)
 	}
 
 	p.conns.Delete(conn.RemoteAddr())
+	// 下面一行等价 conn.Close()
 	client.Close()
 }
 

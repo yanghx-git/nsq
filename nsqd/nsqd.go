@@ -509,6 +509,9 @@ func (n *NSQD) GetTopic(topicName string) *Topic {
 	}
 
 	n.Lock()
+	// double check
+	// 获取到写锁，先判断 topic 是否已经存在
+	// 获取锁的时候，可能获取不到锁，程序会阻塞，再次获取锁的时候，需要判断竞态资源是否改变
 
 	t, ok = n.topicMap[topicName]
 	if ok {

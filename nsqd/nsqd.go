@@ -499,6 +499,7 @@ func (n *NSQD) Exit() {
 
 // GetTopic performs a thread safe operation
 // to return a pointer to a Topic object (potentially new)
+// 创建 Topic 的流程也在这里面
 func (n *NSQD) GetTopic(topicName string) *Topic {
 	// most likely we already have this topic, so try read lock first
 	n.RLock()
@@ -512,18 +513,22 @@ func (n *NSQD) GetTopic(topicName string) *Topic {
 	// double check
 	// 获取到写锁，先判断 topic 是否已经存在
 	// 获取锁的时候，可能获取不到锁，程序会阻塞，再次获取锁的时候，需要判断竞态资源是否改变
-
 	t, ok = n.topicMap[topicName]
 	if ok {
 		n.Unlock()
 		return t
 	}
+	// 删除的回调函数
 	deleteCallback := func(t *Topic) {
 		n.DeleteExistingTopic(t.name)
 	}
+
+	// 创建 topic
 	t = NewTopic(topicName, n, deleteCallback)
+	// 放入map
 	n.topicMap[topicName] = t
 
+	// 释放锁
 	n.Unlock()
 
 	n.logf(LOG_INFO, "TOPIC(%s): created", t.name)
@@ -554,6 +559,7 @@ func (n *NSQD) GetTopic(topicName string) *Topic {
 	}
 
 	// now that all channels are added, start topic messagePump
+	// 启动 topic
 	t.Start()
 	return t
 }
@@ -609,6 +615,7 @@ func (n *NSQD) Notify(v interface{}, persist bool) {
 				return
 			}
 			n.Lock()
+			// 持久化 topics/channels 信息
 			err := n.PersistMetadata()
 			if err != nil {
 				n.logf(LOG_ERROR, "failed to persist metadata - %s", err)

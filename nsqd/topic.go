@@ -45,7 +45,7 @@ type Topic struct {
 func NewTopic(topicName string, nsqd *NSQD, deleteCallback func(*Topic)) *Topic {
 	t := &Topic{
 		name:              topicName,
-		channelMap:        make(map[string]*Channel),
+		channelMap:        make(map[string]*Channel), // 存储 topic 下的 Channel 信息
 		memoryMsgChan:     make(chan *Message, nsqd.getOpts().MemQueueSize),
 		startChan:         make(chan int, 1),
 		exitChan:          make(chan int),
@@ -54,16 +54,19 @@ func NewTopic(topicName string, nsqd *NSQD, deleteCallback func(*Topic)) *Topic 
 		paused:            0,
 		pauseChan:         make(chan int),
 		deleteCallback:    deleteCallback,
-		idFactory:         NewGUIDFactory(nsqd.getOpts().ID),
+		idFactory:         NewGUIDFactory(nsqd.getOpts().ID), // 消息 id 的工厂
 	}
+	// 根据 topic 的名称后缀判断是否为临时 topic
 	if strings.HasSuffix(topicName, "#ephemeral") {
 		t.ephemeral = true
+		// 临时 topic 的 memoryMsgChan 满了，新的 message 不会写入 Disk
 		t.backend = newDummyBackendQueue()
 	} else {
 		dqLogf := func(level diskqueue.LogLevel, f string, args ...interface{}) {
 			opts := nsqd.getOpts()
 			lg.Logf(opts.Logger, opts.LogLevel, lg.LogLevel(level), f, args...)
 		}
+		// 磁盘队列，存数据到 磁盘
 		t.backend = diskqueue.New(
 			topicName,
 			nsqd.getOpts().DataPath,
@@ -75,9 +78,11 @@ func NewTopic(topicName string, nsqd *NSQD, deleteCallback func(*Topic)) *Topic 
 			dqLogf,
 		)
 	}
-
+	// 将 message 分发到 topic 下所有的 channel
+	// 启动携程
 	t.waitGroup.Wrap(t.messagePump)
 
+	// 通知
 	t.nsqd.Notify(t, !t.ephemeral)
 
 	return t
@@ -183,10 +188,12 @@ func (t *Topic) PutMessage(m *Message) error {
 	if atomic.LoadInt32(&t.exitFlag) == 1 {
 		return errors.New("exiting")
 	}
+	// 拿到读锁之后，进行写入操作
 	err := t.put(m)
 	if err != nil {
 		return err
 	}
+	// 统计信息
 	atomic.AddUint64(&t.messageCount, 1)
 	atomic.AddUint64(&t.messageBytes, uint64(len(m.Body)))
 	return nil
@@ -217,10 +224,14 @@ func (t *Topic) PutMessages(msgs []*Message) error {
 	return nil
 }
 
+// 重点的写入流程
 func (t *Topic) put(m *Message) error {
 	// If mem-queue-size == 0, avoid memory chan, for more consistent ordering,
 	// but try to use memory chan for deferred messages (they lose deferred timer
 	// in backend queue) or if topic is ephemeral (there is no backend queue).
+
+	// 如果 mem-queue-size == 0，避免 memory chan，以获得更一致的排序，
+	// 但尝试对延迟消息使用 memory chan（它们会丢失延迟计时器 在后端队列中）或者如果主题是临时的（没有后端队列）。
 	if cap(t.memoryMsgChan) > 0 || t.ephemeral || m.deferred != 0 {
 		select {
 		case t.memoryMsgChan <- m:
@@ -229,6 +240,7 @@ func (t *Topic) put(m *Message) error {
 			break // write to backend
 		}
 	}
+	// 会将数据写入 backend
 	err := writeMessageToBackend(m, t.backend)
 	t.nsqd.SetHealth(err)
 	if err != nil {

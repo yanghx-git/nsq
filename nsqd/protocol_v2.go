@@ -811,12 +811,14 @@ func (p *protocolV2) PUB(client *clientV2, params [][]byte) ([]byte, error) {
 
 	// 获取topic ,不存在的话 会创建
 	topic := p.nsqd.GetTopic(topicName)
+	// 创建  message
 	msg := NewMessage(topic.GenerateID(), messageBody)
+	// 将 message 发送给 topic 中的队列 channel
 	err = topic.PutMessage(msg)
 	if err != nil {
 		return nil, protocol.NewFatalClientErr(err, "E_PUB_FAILED", "PUB failed "+err.Error())
 	}
-
+	// 统计 发送消息的数量
 	client.PublishedMessage(topicName, 1)
 
 	return okBytes, nil

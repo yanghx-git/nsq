@@ -188,6 +188,7 @@ func (p *protocolV2) Exec(client *clientV2, params [][]byte) ([]byte, error) {
 	case bytes.Equal(params[0], []byte("REQ")):
 		return p.REQ(client, params)
 	case bytes.Equal(params[0], []byte("PUB")):
+		// 生产者-发布
 		return p.PUB(client, params)
 	case bytes.Equal(params[0], []byte("MPUB")):
 		return p.MPUB(client, params)
@@ -198,6 +199,7 @@ func (p *protocolV2) Exec(client *clientV2, params [][]byte) ([]byte, error) {
 	case bytes.Equal(params[0], []byte("TOUCH")):
 		return p.TOUCH(client, params)
 	case bytes.Equal(params[0], []byte("SUB")):
+		// 消费者-订阅消息
 		return p.SUB(client, params)
 	case bytes.Equal(params[0], []byte("CLS")):
 		return p.CLS(client, params)
@@ -587,15 +589,19 @@ func (p *protocolV2) CheckAuth(client *clientV2, cmd, topicName, channelName str
 	return nil
 }
 
+// SUB <topic_name> <channel_name>\n
+// <topic_name> - 字符串 (建议包含 #ephemeral 后缀)
+// <channel_name> - 字符串 (建议包含 #ephemeral 后缀)
 func (p *protocolV2) SUB(client *clientV2, params [][]byte) ([]byte, error) {
+	// 判断 client 的状态
 	if atomic.LoadInt32(&client.State) != stateInit {
 		return nil, protocol.NewFatalClientErr(nil, "E_INVALID", "cannot SUB in current state")
 	}
-
+	// 心跳检查，不能在禁用心跳的情况下进行 SUB
 	if client.HeartbeatInterval <= 0 {
 		return nil, protocol.NewFatalClientErr(nil, "E_INVALID", "cannot SUB with heartbeats disabled")
 	}
-
+	// 参数检查 是否  sub topicName channelName
 	if len(params) < 3 {
 		return nil, protocol.NewFatalClientErr(nil, "E_INVALID", "SUB insufficient number of parameters")
 	}
@@ -611,7 +617,7 @@ func (p *protocolV2) SUB(client *clientV2, params [][]byte) ([]byte, error) {
 		return nil, protocol.NewFatalClientErr(nil, "E_BAD_CHANNEL",
 			fmt.Sprintf("SUB channel name %q is not valid", channelName))
 	}
-
+	// 认证
 	if err := p.CheckAuth(client, "SUB", topicName, channelName); err != nil {
 		return nil, err
 	}
@@ -619,15 +625,23 @@ func (p *protocolV2) SUB(client *clientV2, params [][]byte) ([]byte, error) {
 	// This retry-loop is a work-around for a race condition, where the
 	// last client can leave the channel between GetChannel() and AddClient().
 	// Avoid adding a client to an ephemeral channel / topic which has started exiting.
+	// 这个重试循环是一个竞争条件的变通方法，其中
+	// 最后一个客户端可以离开 GetChannel() 和 AddClient() 之间的通道。
+	// 避免将客户端添加到已开始退出的临时通道/主题。
+
 	var channel *Channel
 	for i := 1; ; i++ {
+		// 取 topic ,没有的话，就创建
 		topic := p.nsqd.GetTopic(topicName)
+		// 去 channel ,没有的话，就创建
 		channel = topic.GetChannel(channelName)
+		// 把 client 放入 Channel 中, 一个 Channel 对应多个 client
 		if err := channel.AddClient(client.ID, client); err != nil {
 			return nil, protocol.NewFatalClientErr(err, "E_SUB_FAILED", "SUB failed "+err.Error())
 		}
-
+		// 临时，或者 topic,channel 正在退出
 		if (channel.ephemeral && channel.Exiting()) || (topic.ephemeral && topic.Exiting()) {
+			// 移除这个client
 			channel.RemoveClient(client.ID)
 			if i < 2 {
 				time.Sleep(100 * time.Millisecond)
@@ -637,9 +651,12 @@ func (p *protocolV2) SUB(client *clientV2, params [][]byte) ([]byte, error) {
 		}
 		break
 	}
+	// 更新 client 的 State 为 stateSubscribed 表示已订阅，无法再次订阅
 	atomic.StoreInt32(&client.State, stateSubscribed)
+	// 一个 client 只关联一个 Channel ， 一个 	Channel 关联多个 Client
 	client.Channel = channel
 	// update message pump
+	// 发送订阅事件到 channel
 	client.SubEventChan <- channel
 
 	return okBytes, nil

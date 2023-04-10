@@ -167,7 +167,8 @@ type clientV2 struct {
 	SampleRate int32
 
 	IdentifyEventChan chan identifyEvent
-	SubEventChan      chan *Channel
+	// 订阅事件
+	SubEventChan chan *Channel
 
 	TLS     int32
 	Snappy  int32

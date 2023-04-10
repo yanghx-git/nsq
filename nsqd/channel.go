@@ -76,16 +76,17 @@ func NewChannel(topicName string, channelName string, nsqd *NSQD,
 	deleteCallback func(*Channel)) *Channel {
 
 	c := &Channel{
-		topicName:      topicName,
+		topicName:      topicName, // 对应到 topic
 		name:           channelName,
 		memoryMsgChan:  nil,
-		clients:        make(map[int64]Consumer),
+		clients:        make(map[int64]Consumer), // 一个 Channel 会对应多个 client
 		deleteCallback: deleteCallback,
 		nsqd:           nsqd,
 		ephemeral:      strings.HasSuffix(channelName, "#ephemeral"),
 	}
 	// avoid mem-queue if size == 0 for more consistent ordering
 	if nsqd.getOpts().MemQueueSize > 0 || c.ephemeral {
+		// 初始化消息 channel , 并指定 channel 缓冲大小
 		c.memoryMsgChan = make(chan *Message, nsqd.getOpts().MemQueueSize)
 	}
 	if len(nsqd.getOpts().E2EProcessingLatencyPercentiles) > 0 {
@@ -96,7 +97,7 @@ func NewChannel(topicName string, channelName string, nsqd *NSQD,
 	}
 
 	c.initPQ()
-
+	// 临时 Channel
 	if c.ephemeral {
 		c.backend = newDummyBackendQueue()
 	} else {

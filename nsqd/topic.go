@@ -107,7 +107,7 @@ func (t *Topic) GetChannel(channelName string) *Channel {
 	t.Lock()
 	channel, isNew := t.getOrCreateChannel(channelName)
 	t.Unlock()
-
+	// 是否新创建
 	if isNew {
 		// update messagePump state
 		select {
